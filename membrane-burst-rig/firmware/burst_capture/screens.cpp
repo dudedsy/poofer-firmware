@@ -120,6 +120,11 @@ void draw_prompt(Gfx &g, const PromptView &v) {
   }
   snprintf(s, sizeof s, "adc err %u%s  chip %dC", v.err_samples, v.err_samples ? "!" : "", v.chip_temp_c);
   g.line(4, s);
+  if (v.trig_ch >= 0) {
+    fmt_psi(a, v.trig_drop_psi);
+    snprintf(s, sizeof s, "trig ch%d drop %s psi", v.trig_ch, a);
+    g.line(6, s);
+  }
   if (!v.storage_ok) g.line(5, "STORAGE UNAVAILABLE");
   else if (v.free_slots <= 0) g.line(5, "STORAGE FULL");
   else {

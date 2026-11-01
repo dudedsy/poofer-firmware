@@ -20,7 +20,7 @@
 
 struct CapHdr {
   uint32_t magic;
-  uint16_t version;          // 3 (added cpp, chip temperature)
+  uint16_t version;          // 4 (added cpp, chip temperature, trigger channel/drop)
   uint16_t hdr_bytes;
   uint32_t id;               // capture number, unique and increasing
   uint32_t session;          // collect-mode session number
@@ -41,7 +41,8 @@ struct CapHdr {
   float    pre_mean[4];      // counts
   float    end_mean[4];      // counts
   int16_t  chip_temp_x10;    // RP2040 die temperature at capture, 0.1 C (rough ambient)
-  uint16_t reserved;
+  uint8_t  trig_ch;          // channel that tripped the drop trigger, 0xFF = forced (v4+)
+  uint8_t  trig_drop_x10;    // its drop below the 20 ms baseline when it tripped, 0.1 psi, max 25.5 (v4+)
   uint32_t data_bytes;
   uint32_t data_crc;
   uint32_t hdr_crc;          // CRC32 of every byte above

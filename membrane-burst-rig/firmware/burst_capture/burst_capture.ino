@@ -60,6 +60,7 @@
 #define POST_MS     80          // capture length after the trigger point
 #define HIST_MS     20          // look-back window for the drop trigger
 #define HOLDOFF_MS  300         // re-arm delay after a capture / restart
+#define TRIG_HOLD_MS 10         // drop must persist this many ms (rejects glitches); < PRE_MS
 
 // Sensor scaling for the display and thresholds (0-100 psi, 10%..90% of supply,
 // ratiometric to the 3V3 that also feeds ADC_VREF).
@@ -108,6 +109,11 @@ static uint32_t hist_n = 0;
 static uint32_t arm_at_ms = HOLDOFF_MS;
 static bool     pending = false;
 static bool     pending_forced = false;
+static int      trig_ch = -1;               // channel that tripped, -1 = forced
+static float    trig_drop = 0;              // its drop below baseline at the first ms, counts
+static uint8_t  drop_run[MAX_CH];           // consecutive ms each channel has been below baseline
+static float    drop_first[MAX_CH];         // drop at the first ms of that run, counts
+static float    drop_base[MAX_CH];          // baseline frozen at the first ms of that run
 static uint32_t trig_ms = 0;
 static uint32_t live_sent = 0;
 
@@ -299,6 +305,10 @@ static void send_entry(const CapHdr &h, const char *type) {
   Serial.print(",\"err_samples\":"); Serial.print(h.err_samples);
   Serial.print(",\"uptime_ms\":");   Serial.print(h.uptime_ms);
   Serial.print(",\"chip_temp_c\":"); Serial.print(h.chip_temp_x10 / 10.0f, 1);
+  if (h.version >= 4) {
+    Serial.print(",\"trig_ch\":"); if (h.trig_ch == 0xFF) Serial.print("null"); else Serial.print(h.trig_ch);
+    Serial.print(",\"trig_drop_psi\":"); Serial.print(h.trig_drop_x10 / 10.0f, 1);
+  }
   Serial.print(",\"zero\":[");
   for (int c = 0; c < h.n_ch; c++) { if (c) Serial.print(','); Serial.print(h.zero[c]); }
   Serial.print("],\"cpp\":");        print_array(h.cpp, h.n_ch, nullptr, nullptr, 3);
@@ -356,7 +366,7 @@ static void enter_mode(Mode m);
 static void force_capture() {
   if (!acq_running || pending) return;
   uint32_t now_ms = blocks_processed * BLOCK_MS;
-  if (now_ms >= PRE_MS) { pending = true; pending_forced = true; trig_ms = now_ms; if (mode == MODE_COLLECT) cstate = CS_PENDING; }
+  if (now_ms >= PRE_MS) { pending = true; pending_forced = true; trig_ms = now_ms; trig_ch = -1; trig_drop = 0; if (mode == MODE_COLLECT) cstate = CS_PENDING; }
   else info("too soon after restart, try again");
 }
 
@@ -405,18 +415,36 @@ static void process_ms(const uint16_t *s, uint32_t ms_index) {
 
   // drop trigger: always in Live, only when armed in Collect
   bool trig_on = (mode == MODE_LIVE) || (mode == MODE_COLLECT && cstate == CS_ARMED);
+  // A channel trips when its 1 ms mean drops more than the threshold below the mean
+  // of its previous 20 ms and stays below that (frozen) baseline minus the threshold
+  // for TRIG_HOLD_MS ms in a row. A mean baseline barely moves for a brief upward
+  // blip, and the hold rejects anything that recovers; a burst drops and stays down.
+  // The trigger point is the first ms of the run, so the pre-burst window is not
+  // shifted by the hold.
   if (trig_on && !pending && hist_n >= HIST_MS && ms_index >= arm_at_ms) {
     for (int c = 0; c < n_ch; c++) {
       if (c == RAIL_CH) continue;
-      uint16_t td = trig_counts(c);
-      float mx = hist[c][0];
-      for (int k = 1; k < HIST_MS; k++) if (hist[c][k] > mx) mx = hist[c][k];
-      if (mx - mean[c] > td) {
-        pending = true; pending_forced = false; trig_ms = ms_index;
-        if (mode == MODE_COLLECT) cstate = CS_PENDING;
-        break;
+      float base;
+      if (drop_run[c]) base = drop_base[c];
+      else {
+        base = 0;
+        for (int k = 0; k < HIST_MS; k++) base += hist[c][k];
+        base /= HIST_MS;
       }
+      float drop = base - mean[c];
+      if (drop > trig_counts(c)) {
+        if (drop_run[c] == 0) { drop_first[c] = drop; drop_base[c] = base; }
+        if (++drop_run[c] >= TRIG_HOLD_MS) {
+          pending = true; pending_forced = false;
+          trig_ms = ms_index - (TRIG_HOLD_MS - 1);
+          trig_ch = c; trig_drop = drop_first[c];
+          if (mode == MODE_COLLECT) cstate = CS_PENDING;
+          break;
+        }
+      } else drop_run[c] = 0;
     }
+  } else {
+    for (int c = 0; c < MAX_CH; c++) drop_run[c] = 0;
   }
   for (int c = 0; c < n_ch; c++) hist[c][ms_index % HIST_MS] = mean[c];
   hist_n++;
@@ -489,6 +517,8 @@ static void handle_live_capture() {
   if (finish_capture() && host()) {
     Serial.print("J,{\"t\":\"live_meta\",\"num\":"); Serial.print(live_sent + 1);
     Serial.print(",\"chip_temp_c\":"); Serial.print(read_chip_temp(), 1);
+    Serial.print(",\"trig_ch\":"); if (trig_ch < 0) Serial.print("null"); else Serial.print(trig_ch);
+    Serial.print(",\"trig_drop_psi\":"); Serial.print(trig_ch < 0 ? 0.0f : trig_drop / cfg.cpp[trig_ch], 2);
     Serial.println('}');
     send_ring_capture(++live_sent, pending_forced);
   }
@@ -505,6 +535,11 @@ static void handle_collect_capture() {
   cap_hdr.tag = cfg.tag;
   cap_hdr.n_ch = n_ch;
   cap_hdr.forced = pending_forced;
+  cap_hdr.trig_ch = trig_ch < 0 ? 0xFF : (uint8_t)trig_ch;
+  {
+    float dp = trig_ch < 0 ? 0 : trig_drop / cfg.cpp[trig_ch] * 10.0f + 0.5f;
+    cap_hdr.trig_drop_x10 = dp > 255 ? 255 : (uint8_t)dp;
+  }
   cap_hdr.frames = frames;
   cap_hdr.trig_frame = PRE_MS * f;
   cap_hdr.fs_ch = SPS_TOTAL / n_ch;
@@ -533,6 +568,8 @@ static void handle_collect_capture() {
   }
   prompt.err_samples = err;
   prompt.chip_temp_c = (int)(tc + (tc >= 0 ? 0.5f : -0.5f));
+  prompt.trig_ch = trig_ch;
+  prompt.trig_drop_psi = trig_ch < 0 ? 0 : trig_drop / cfg.cpp[trig_ch];
   prompt.free_slots = store_free();
   prompt.storage_ok = store_ok();
   cstate = CS_PROMPT;

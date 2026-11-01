@@ -115,7 +115,7 @@ Setup:
 Acquisition (all modes):
 - 300 ksps total, round-robin over 1 to 3 channels (300 / 150 / 100 kHz per channel).
 - DMA into a 156 KB ring buffer, 260 ms deep, processed as 1 ms means for display and triggering.
-- **Trigger:** any sensor's 1 ms mean drops more than the drop-trigger threshold (default 1.0 psi, about 33 counts) below its maximum over the previous 20 ms.
+- **Trigger:** any sensor's 1 ms mean falls more than the drop-trigger threshold (default 1.0 psi, about 33 counts) below the mean of its previous 20 ms and stays below that level for 10 consecutive ms. The trigger point is the first of those ms. Earlier versions compared against the 20 ms maximum with no hold, so a single 1 ms glitch of a few psi in either direction fired it as soon as Collect armed. The keep/drop screen and each capture's json (`trig_ch`, `trig_drop_psi`) say which channel tripped and by how much.
 - **Capture window:** 20 ms before the trigger and 80 ms after (was 50 / 200). On synthetic data the fit recovers tau to within 0.3% with this window; 10 / 50 was also fine and 5 / 30 started biasing the slowest (4 ms) sensor by ~1%. 20 / 80 leaves room for real sensors slower than the synthetic ones. `PRE_MS` / `POST_MS` are compile-time constants.
 
 ### Modes and buttons

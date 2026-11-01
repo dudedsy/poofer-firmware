@@ -15,6 +15,8 @@
 //            !leds                     print the four RGB LED colours to stderr
 //            !mark <text>              echo <text> to stderr (log sync)
 //            !tca_por                  power-on-reset the TCA9555 only (supply dip)
+//            !glitch <ch> <counts> <ms>  add <counts> to one channel for <ms>
+//            !noise <counts>           per-sample noise sigma (default 1.5)
 //            !quit
 // stdout : the board's USB serial output (binary safe)
 // stderr : simulator diagnostics; lines starting with "SIMERR" are bugs caught by
@@ -166,7 +168,11 @@ static uint64_t burst_t0 = 0;
 static double p_burst = 0;
 static double sens[3] = {0, 0, 0};
 static std::mt19937 rng(1);
-static std::normal_distribution<double> noise(0.0, 1.5);
+static std::normal_distribution<double> noise(0.0, 1.0);
+static double noise_counts = 1.5;                         // per-sample noise sigma (!noise)
+static int glitch_ch = -1;                                // !glitch: offset one channel briefly
+static double glitch_counts = 0;
+static uint64_t glitch_t0 = 0, glitch_us = 0;
 
 static double rig_psi(uint64_t t) {
   if (bursting) {
@@ -188,7 +194,8 @@ static void produce_block() {
     double p = rig_psi((uint64_t)t_us);
     double dt = nch / 300000.0;
     sens[c] += (p - sens[c]) * (1.0 - exp(-dt / tau_s[c]));
-    double v = zero_counts[c] + sens[c] * CPP * gain[c] + noise(rng);
+    double v = zero_counts[c] + sens[c] * CPP * gain[c] + noise(rng) * noise_counts;
+    if (c == glitch_ch && t_us >= glitch_t0 && t_us < glitch_t0 + glitch_us) v += glitch_counts;
     int counts = (int)lround(v);
     if (counts < 0) counts = 0;
     if (counts > 4095) counts = 4095;
@@ -399,6 +406,10 @@ static bool do_cmd(const std::string &c) {
     tca = Tca();
     oled_reset();                              // RES# falls as the pins become inputs
     fprintf(stderr, "SIM tca power-on reset (display was %s)\n", on ? "on" : "off");
+  } else if (sscanf(c.c_str(), "!glitch %d %lf %lf", &glitch_ch, &x, &y) == 3) {
+    glitch_counts = x; glitch_t0 = vt_us; glitch_us = (uint64_t)(y * 1000);   // ch, counts, ms
+  } else if (sscanf(c.c_str(), "!noise %lf", &x) == 1) {
+    noise_counts = x;
   } else if (c == "!burst") {
     p_burst = rig_psi(vt_us); bursting = true; burst_t0 = vt_us;
   } else if (sscanf(c.c_str(), "!screen %255s", a) == 1) write_screen(a);

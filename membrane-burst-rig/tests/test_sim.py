@@ -241,6 +241,46 @@ def test_blank_and_wake():
         assert not any(i.startswith("#captured") for i in infos(items))
 
 
+def test_trigger_ignores_glitches():
+    # 1-2 ms blips of several psi, up or down, on either channel, plus heavy noise:
+    # all must leave Collect armed (LED1 red) with no capture
+    lines = ENTER_COLLECT + ["!p 30 400", "!wait 1100"]
+    for g in ["!glitch 0 100 1", "!glitch 0 -100 1", "!glitch 1 100 2", "!glitch 1 -100 2", "!glitch 0 300 1",
+              "!glitch 0 -100 5", "!glitch 1 -200 8", "!noise 40"]:
+        lines += [g, "!wait 300"]
+    lines += ["!leds"]
+    items, err = run(lines)
+    assert leds(err)[-1][0] == "red", leds(err)
+    assert not any(i.startswith("#captured") for i in infos(items))
+
+
+def test_trigger_timing_and_diagnostics():
+    # low-pressure burst, then a normal one; the trigger point must sit at the start
+    # of the drop and the capture must name the channel that tripped
+    with tempfile.TemporaryDirectory() as tmp:
+        st = os.path.join(tmp, "state.bin")
+        run(ENTER_COLLECT + burst_cycle(6) + burst_cycle(40), state=st)
+        port = SimPort(["--state", st])
+        try:
+            time.sleep(0.3)
+            dev = Device(port, verbose=False)
+            entries, _ = dev.list()
+            assert [e["id"] for e in entries] == [1, 2], entries
+            for e in entries:
+                meta, hdr, counts = dev.read(e["id"])
+                assert meta["trig_ch"] == 0 and 0.9 < meta["trig_drop_psi"] < 25.6, meta
+                c = counts[:, 0].astype(float)
+                fs = meta["fs_ch"] / 1000.0                     # frames per ms
+                p0 = c[: meta["trig_frame"] - int(5 * fs)].mean()
+                p0_psi = (p0 - meta["zero"][0]) / meta["cpp"][0]
+                thresh = p0 - 0.5 * meta["cpp"][0]              # 0.5 psi below p0
+                first = int(np.argmax(c < thresh))
+                dt_ms = (first - meta["trig_frame"]) / fs
+                assert -1.5 < dt_ms < 1.0, (e["id"], p0_psi, dt_ms)
+        finally:
+            port.close()
+
+
 def test_display_recovery():
     with tempfile.TemporaryDirectory() as tmp:
         s = lambda n: "!screen " + os.path.join(tmp, f"{n}.pbm")

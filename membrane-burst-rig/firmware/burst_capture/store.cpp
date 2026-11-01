@@ -161,7 +161,7 @@ int store_save(CapHdr &h, uint32_t n, uint16_t (*sample)(uint32_t)) {
   }
 
   h.magic = CAP_MAGIC;
-  h.version = 3;
+  h.version = 4;
   h.hdr_bytes = sizeof(CapHdr);
   h.packing = 1;
   h.data_bytes = data_bytes;
