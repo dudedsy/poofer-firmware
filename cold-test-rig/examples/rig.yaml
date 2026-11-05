@@ -1,0 +1,56 @@
+# rig.yaml - how the cold-test rig is wired. Copy next to where you run rigctl and edit.
+# Every key is optional; missing keys take the defaults in host/rigctl/config.py.
+
+port: COM5                     # `rigctl ports` lists them
+data_dir: data                 # runs, experiments and valve files go here (relative to this file)
+bus_voltage: 24.0              # MEASURE at the base board +24V with a meter; used for coil R estimates
+
+pressure:                      # 1 to 3 sensors. adc = base board J3 ADC line (0..3)
+  - {name: accumulator, adc: 0, range_psi: 100, supply: 3.3}   # J3.19, fit C17 1 nF C0G
+  - {name: nozzle,      adc: 1, range_psi: 100, supply: 3.3}   # J3.21, fit C16 1 nF C0G
+  # - {name: plenum,    adc: 2, range_psi: 100, supply: 3.3}   # J3.23 (C15): only with led: null
+  # 5 V sensors through a divider: supply: 5.0, divider: 0.6
+accumulator_sensor: accumulator
+nozzle_sensor: nozzle
+
+valve:                         # solenoid driver board: JP1 row = pair, JP2 line = adc
+  pair: 1                      # CH1 FIRE / CH2 PWM
+  adc: 3                       # JP2 on ADC3 (J3.25)
+  t_max_s: null                # MEASURED hardware limiter T_max (solenoid spec §12); shots refuse > T_max / 2
+  r_coil: 8.5                  # replaced by `rigctl characterize` results when an experiment names a valve
+  l_coil: 0.1
+  peak_a: 2.7
+  peak_ms: 100
+  hold_a: 1.0
+  hold_duty_max: 0.5           # 12 V coil on 24 V
+  max_on_ms: 3000
+
+led:                           # shadowgraph LED buck board, or null if not fitted
+  pair: 2                      # CH3 / CH4
+  adc: 2                       # JP2 on ADC2 (J3.23)
+  current_a: 2.0
+  max_on_s: 20
+
+thermocouple: {type: K, label: gas}   # igniter board ADS1115 (0x48) + TMP1075 (0x4C); null if absent
+
+camera:
+  backend: ffmpeg              # ffmpeg | none   (fake is for the simulator)
+  device: Global Shutter Camera
+  size: 1280x720
+  fps: 200
+  fps_real: null               # set if the camera's real rate differs (Arducam fast modes: measured table)
+  pixel_format: yuyv422        # or mjpeg
+  ffmpeg: ffmpeg
+
+video:                         # pixel coordinates at full resolution (rigctl camera snapshot)
+  sync_roi: null               # [x0, y0, x1, y1] box around the signal LED; null = find it automatically
+  jet_roi: null                # [x0, y0, x1, y1] where the jet can be; null = whole frame
+  nozzle_px: null              # [x, y] nozzle exit; null = left edge, mid height
+  direction: +x
+  mm_per_px: 1.7               # measure with a ruler on the screen plane
+  analysis_scale: 0.5
+
+shot:
+  fire_ms: 800                 # go -> fire: LED settles, background frames
+  post_ms: 1500                # release -> end of recording
+  tc_ms: null                  # signal-LED timecode cell; null = chosen from the frame rate

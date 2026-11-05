@@ -7,3 +7,8 @@ __pycache__/
 build/
 membrane-burst-rig/tools/sim/burst_sim
 libraries/PooferCommon/tests/drive_sim
+cold-test-rig/tools/sim/rig_sim
+sim_data/
+sim_truth.csv
+rig_cal.json
+*.egg-info/
