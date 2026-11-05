@@ -6,3 +6,4 @@ __pycache__/
 *.pyc
 build/
 membrane-burst-rig/tools/sim/burst_sim
+libraries/PooferCommon/tests/drive_sim
