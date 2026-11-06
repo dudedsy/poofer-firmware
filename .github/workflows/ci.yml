@@ -24,6 +24,8 @@ jobs:
         run: |
           make -C membrane-burst-rig/tools/sim
           python membrane-burst-rig/tests/test_sim.py
+      - name: PooferCommon current drive simulation
+        run: make -C libraries/PooferCommon/tests test
 
   firmware-build:
     runs-on: ubuntu-24.04
@@ -34,6 +36,8 @@ jobs:
           - firmware/poofer_main
           - board-test/firmware/main_board_test
           - membrane-burst-rig/firmware/burst_capture
+          - shadowgraph-led/firmware/led_driver
+          - libraries/PooferCommon/examples/solenoid_drive
     env:
       CORE_URL: https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
       FQBN: rp2040:rp2040:waveshare_rp2040_zero
