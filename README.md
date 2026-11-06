@@ -9,6 +9,7 @@ Firmware, test rigs and host tools for the Brain Freeze propane poofer project (
 | [`board-test/`](board-test/) | Bring-up test firmware for the DMX base board, UI lid board, solenoid driver and igniter boards, plus `host/artnet_send.py` (Art-Net source for the DMX receive test). |
 | [`membrane-burst-rig/`](membrane-burst-rig/) | Membrane burst rig for measuring pressure-sensor response time: RP2040 capture firmware, laptop logger, and the blowdown/sensor-lag fit. |
 | [`shadowgraph-led/`](shadowgraph-led/) | Cold-test shadowgraph light: a solenoid driver board run as a current-regulated buck for a Cree XHP70.2, current set over USB serial. Bench / test rig only. |
+| [`cold-test-rig/`](cold-test-rig/) | Nozzle cold-test experiments: `rig_control` firmware (valve, shadowgraph LED, pressures, thermocouple, video timecode) and the `rigctl` laptop tool (experiment files, camera, raw data, reports), with a simulator for end-to-end tests. |
 
 ## Building the sketches
 
@@ -38,8 +39,8 @@ arduino-cli compile --fqbn rp2040:rp2040:waveshare_rp2040_zero --library librari
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push to main and every PR:
 
-- Host tests: `board-test/tests/test_dmx.py` (DMX parser on synthetic UART streams, Art-Net packet layout), `membrane-burst-rig/tests/test_parser.py`, the burst rig simulator tests (`make -C membrane-burst-rig/tools/sim`, then `test_sim.py`), and the PooferCommon current drive simulation (`make -C libraries/PooferCommon/tests test`: LED buck and solenoid peak and hold against an averaged plant over bus voltage, inductance and coil resistance, plus fault cases).
-- Firmware builds: all five sketches (`firmware/poofer_main`, the board test, burst capture, `shadowgraph-led/firmware/led_driver`, `libraries/PooferCommon/examples/solenoid_drive`) compiled with arduino-cli against arduino-pico 6.3.0.
+- Host tests: `board-test/tests/test_dmx.py` (DMX parser on synthetic UART streams, Art-Net packet layout), `membrane-burst-rig/tests/test_parser.py`, the burst rig simulator tests (`make -C membrane-burst-rig/tools/sim`, then `test_sim.py`), the PooferCommon current drive simulation (`make -C libraries/PooferCommon/tests test`: LED buck and solenoid peak and hold against an averaged plant over bus voltage, inductance and coil resistance, plus fault cases), and the cold-test rig end-to-end test (`cold-test-rig/tests/test_rig.py`: firmware core in the simulator driven by rigctl, valve characterization and an experiment with video sync, checked against the simulator's parameters).
+- Firmware builds: all six sketches (`firmware/poofer_main`, the board test, burst capture, `shadowgraph-led/firmware/led_driver`, `libraries/PooferCommon/examples/solenoid_drive`, `cold-test-rig/firmware/rig_control`) compiled with arduino-cli against arduino-pico 6.3.0.
 
 Run the host tests locally (needs Python 3, `g++`, `make` and `membrane-burst-rig/requirements.txt`; WSL works):
 
@@ -48,4 +49,5 @@ python3 board-test/tests/test_dmx.py
 python3 membrane-burst-rig/tests/test_parser.py
 make -C membrane-burst-rig/tools/sim && python3 membrane-burst-rig/tests/test_sim.py
 make -C libraries/PooferCommon/tests test
+pip install -e cold-test-rig/host && python3 cold-test-rig/tests/test_rig.py   # needs ffmpeg
 ```

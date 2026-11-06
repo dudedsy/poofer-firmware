@@ -1,0 +1,17 @@
+# screening.yaml - example experiment. rigctl run screening.yaml --name 2026-11-07-first
+name: nozzle-screening
+valve: uss2-34                 # valves/uss2-34.json from `rigctl characterize uss2-34 --pressure 60`
+defaults:
+  open_ms: 300
+  pressure_psi: 60
+  pressure_tol: 2
+conditions:                    # hardware set-ups, in this order; you are asked to swap between them
+  - {nozzle: N1-straight, diffuser: none}
+  - {nozzle: N1-straight, diffuser: honeycomb-6mm}
+  - {nozzle: N2-taper, diffuser: honeycomb-6mm}
+sweep:                         # every combination inside each condition
+  open_ms: [150, 400]
+  pressure_psi: [40, 60]
+repeats: 3
+order: shuffled                # shuffled within each condition, so drift doesn't line up with a parameter
+seed: 1

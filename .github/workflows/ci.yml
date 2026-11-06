@@ -26,6 +26,11 @@ jobs:
           python membrane-burst-rig/tests/test_sim.py
       - name: PooferCommon current drive simulation
         run: make -C libraries/PooferCommon/tests test
+      - name: Cold-test rig end to end (simulator + rigctl)
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+          pip install -e cold-test-rig/host
+          python cold-test-rig/tests/test_rig.py
 
   firmware-build:
     runs-on: ubuntu-24.04
@@ -38,6 +43,7 @@ jobs:
           - membrane-burst-rig/firmware/burst_capture
           - shadowgraph-led/firmware/led_driver
           - libraries/PooferCommon/examples/solenoid_drive
+          - cold-test-rig/firmware/rig_control
     env:
       CORE_URL: https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
       FQBN: rp2040:rp2040:waveshare_rp2040_zero

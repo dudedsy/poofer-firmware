@@ -1,0 +1,16 @@
+# rig_sim.yaml - the same rig against the simulator (Linux / WSL):
+#   make -C cold-test-rig/tools/sim && rigctl sim --truth sim_truth.csv     (one terminal)
+#   rigctl --rig rig_sim.yaml characterize sim-valve --pressure 60 --auto   (another)
+port: socket://127.0.0.1:5555
+data_dir: sim_data
+bus_voltage: 24.3              # the simulator's bus
+valve: {t_max_s: 12}
+camera:
+  backend: fake
+  fps: 200
+  fake: {truth: sim_truth.csv, size: 320x180}
+video:
+  sync_roi: [304, 4, 316, 16]  # the fake camera's signal LED
+  nozzle_px: [10, 90]
+  mm_per_px: 6.7               # 320 px across about 2.1 m
+  analysis_scale: 1.0
