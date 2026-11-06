@@ -264,6 +264,18 @@ python analysis/blowdown_fit.py syn/rig_config.json --plots syn/plots --per-capt
 python tests/test_parser.py
 ```
 
+## Steady-pressure noise and update-rate check
+
+`analysis/noise_check.py` compares sensors and power/grounding setups from forced captures at a steady pressure (vented is fine). Use one tag per setup in Collect mode, press UP 3+ times per setup, dump, then:
+
+```
+python analysis/noise_check.py "runs/*" --plots noise_plots
+```
+
+Per capture and channel: RMS and pk-pk (counts, ~33 per psi at 3.3 V), 60/120/180 Hz amplitude, the strongest lines above 200 Hz, and the sensor's output update rate estimated from the step spacing. The plots show the full trace, a 10 ms zoom and the spectrum. Unplug USB while capturing if grounding is under test: the laptop is another path to earth.
+
+The update-rate estimate is tested on synthetic data only: reliable from about 100 Hz to 8 kHz when steps are at least about the ADC noise, but at slow rates it sometimes reports half the true rate. Check it against the zoom plot.
+
 ## Simulator and tests
 
 `tools/sim` builds the real firmware sources on a PC against mock Arduino, Wire, ADC, DMA and flash layers. The I2C bus carries emulated UI-board parts (TCA9555, SSD1315 with its display RAM) and the FRAM, and the ADC sees a modelled rig: pressure ramps, a 0.5 ms blowdown, and sensors with 0.5 / 1.5 / 4 ms lags. The device models flag sequencing errors (talking to the panel while it is in reset, display on without VBAT, FRAM writes with WP high).
