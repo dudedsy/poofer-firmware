@@ -13,6 +13,7 @@ Firmware for bench-testing the production boards: the DMX base board (Rev A), th
 - Arduino IDE with the Earle Philhower **Raspberry Pi Pico/RP2040** core. Built against core 6.3.0.
 - Tools > Board: **Waveshare RP2040 Zero**.
 - Library: **Adafruit NeoPixel** (Library Manager), for the module's WS2812 on GP16.
+- Library: **PooferCommon** from this repo (pin map, DMX parser). One-time junction setup in the [top README](../README.md#one-time-setup-make-the-ide-see-poofercommon); without it the build fails with `poofer_board.h: No such file or directory`.
 - Open `firmware/main_board_test/main_board_test.ino`. First upload goes to the UF2 port (hold BOOT while plugging in); after that the board shows up as a normal serial port.
 - Serial Monitor at any baud (USB). Commands are single letters; line endings are ignored.
 
@@ -81,7 +82,7 @@ Path under test: XLR harness, J1, D3, U3 (ADM2587E) and its isoPower supply (L1,
 4. **Only one Art-Net source.** Quit QLC+ from its own menu (normal exit, so the launcher leaves it closed and the labwc menu can start it again), or unpatch its universe 1 output. Two sources on one universe is undefined at the node.
 5. Get the script onto the Pi (stdlib only, no installs):
    ```
-   wget https://raw.githubusercontent.com/dudedsy/poofer-test/main/board-test/host/artnet_send.py
+   wget https://raw.githubusercontent.com/dudedsy/poofer-firmware/main/board-test/host/artnet_send.py
    ```
 
 **Bench only.** The sender drives every slot of the universe, including values that would arm and fire a poofer running production firmware. The board-test firmware itself never acts on DMX.
@@ -141,7 +142,7 @@ Does the CR011R keep sending its last frame when Art-Net stops? The `e` monitor 
 python3 board-test/tests/test_dmx.py
 ```
 
-Needs `g++`. Compiles `tests/dmx_harness.cpp` around the firmware's own `dmx_rx.h` and feeds it synthetic UART streams built from the sender's pattern function: clean frames, short frames, seq wrap, a corrupt byte, dropped and extra bytes, torn frames, zero padding, framing errors, overruns, alternate start codes, gaps over 1 s and A/B-reversed garbage. Also checks the ArtDmx and ArtPollReply layouts.
+Needs `g++`. Compiles `tests/dmx_harness.cpp` around the firmware's own `libraries/PooferCommon/src/poofer_dmx_rx.h` and feeds it synthetic UART streams built from the sender's pattern function: clean frames, short frames, seq wrap, a corrupt byte, dropped and extra bytes, torn frames, zero padding, framing errors, overruns, alternate start codes, gaps over 1 s and A/B-reversed garbage. Also checks the ArtDmx and ArtPollReply layouts.
 
 ## Notes from bring-up
 

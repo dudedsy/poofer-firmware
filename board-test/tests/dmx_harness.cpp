@@ -1,7 +1,7 @@
-// Host harness for firmware/main_board_test/dmx_rx.h.
+// Host harness for libraries/PooferCommon/src/poofer_dmx_rx.h.
 // stdin: one "<time_us> <UARTDR word, hex>" per line. stdout: final stats as key=value.
 #include <cstdio>
-#include "../firmware/main_board_test/dmx_rx.h"
+#include "../../libraries/PooferCommon/src/poofer_dmx_rx.h"
 
 static DmxRx d;
 

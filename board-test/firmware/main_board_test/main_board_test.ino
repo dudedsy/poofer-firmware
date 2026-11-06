@@ -62,7 +62,8 @@
 #include "hardware/sync.h"
 #include "hardware/timer.h"
 #include "pico/unique_id.h"
-#include "dmx_rx.h"
+#include <poofer_board.h>    // PooferCommon library: base board pin map, I2C addresses
+#include <poofer_dmx_rx.h>   // PooferCommon library: DMX parser
 
 // ---------------------------------------------------------------- config
 // WS2812 colour order. The "RED" step of the colour cycle should look red.
@@ -77,27 +78,12 @@
 #define FRAM_TEST_LEN 16
 #define OLED_IDLE_MS (5UL * 60UL * 1000UL)   // blank the OLED after 5 min untouched
 
-// ---------------------------------------------------------------- pin map (base spec Rev A §5)
-static const uint8_t PIN_DMX_DI = 0;   // to U3 TxD via R48, R38 pull-up to +3V3_DMX
-static const uint8_t PIN_DMX_RO = 1;   // from U3 RxD via R40, R39 pull-up to +3V3_DMX
-static const uint8_t PIN_DMX_DE = 2;   // to U3 DE,/RE via R49, R37 pulldown
-static const uint8_t PIN_BTN[3] = {3, 4, 5};
+// ---------------------------------------------------------------- pin map
+// Pins, connector pins and I2C addresses come from PooferCommon's poofer_board.h.
+// Refdes strings below are only for this test's fault messages.
 static const char*   BTN_NAME[3] = {"UP", "DN", "SET"};
 static const char*   BTN_R[3] = {"R34", "R35", "R36"};
 static const char*   BTN_C[3] = {"C18", "C19", "C20"};
-static const uint8_t BTN_J2[3] = {7, 8, 9};
-static const uint8_t PIN_CH[6] = {6, 7, 8, 9, 10, 11};
-static const uint8_t CH_J3[6] = {5, 7, 9, 11, 13, 15};
-static const uint8_t PIN_SDA = 12, PIN_SCL = 13;
-static const uint8_t PIN_SPARE1 = 14;
-static const uint8_t PIN_FRAM_WP = 15;
-static const uint8_t PIN_WS2812 = 16;
-static const uint8_t PIN_ADC[4] = {26, 27, 28, 29};
-static const uint8_t ADC_J3[4] = {19, 21, 23, 25};
-
-static const uint8_t ADDR_TCA = 0x20;
-static const uint8_t ADDR_OLED = 0x3C;
-static const uint8_t ADDR_FRAM = 0x50;
 
 // TCA9555 bit positions (16-bit: P0.x = bit x, P1.x = bit 8+x)
 #define TCA_VBAT_EN  (1u << 6)   // P0.6, TSSOP-24 pin 10
@@ -812,7 +798,7 @@ static void chPwmHold() {
 
 // ---------------------------------------------------------------- 13a / 'd' / 'e' DMX receive
 // UART0 RX on GP1 (U3 RO via R40). GP0 (DI) stays a plain input and DE stays low, so
-// this board never drives the bus. The IRQ drains the RX FIFO into dmx_feed() (dmx_rx.h).
+// this board never drives the bus. The IRQ drains the RX FIFO into dmx_feed() (poofer_dmx_rx.h).
 static DmxRx g_dmx;
 static bool g_dmxIrqSet = false;
 static uint32_t g_dmxBaud = 0;

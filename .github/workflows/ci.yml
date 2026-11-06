@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python deps
+        run: pip install -r membrane-burst-rig/requirements.txt
+      - name: Board test DMX parser and Art-Net sender
+        run: python board-test/tests/test_dmx.py
+      - name: Burst rig parser
+        run: python membrane-burst-rig/tests/test_parser.py
+      - name: Burst rig simulator
+        run: |
+          make -C membrane-burst-rig/tools/sim
+          python membrane-burst-rig/tests/test_sim.py
+
+  firmware-build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sketch:
+          - firmware/poofer_main
+          - board-test/firmware/main_board_test
+          - membrane-burst-rig/firmware/burst_capture
+    env:
+      CORE_URL: https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+      FQBN: rp2040:rp2040:waveshare_rp2040_zero
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Cache Arduino core
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino15-rp2040-6.3.0-neopixel
+      - name: Install core and libraries
+        run: |
+          arduino-cli config init --overwrite --additional-urls "$CORE_URL"
+          arduino-cli core update-index
+          arduino-cli core install rp2040:rp2040@6.3.0
+          arduino-cli lib install "Adafruit NeoPixel"
+      - name: Compile ${{ matrix.sketch }}
+        run: |
+          arduino-cli compile --fqbn "$FQBN" --library libraries/PooferCommon \
+            --warnings default "${{ matrix.sketch }}"

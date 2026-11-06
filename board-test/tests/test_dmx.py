@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Host tests for the DMX receive test: the firmware parser (dmx_rx.h, compiled with g++
+Host tests for the DMX receive test: the firmware parser (PooferCommon poofer_dmx_rx.h, compiled with g++
 into a small harness) fed with synthetic UART streams built from the real sender's
 pattern function (host/artnet_send.py), plus the Art-Net packet format.
 

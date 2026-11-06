@@ -46,7 +46,7 @@ PROT_VER = 14
 
 
 def h(i):
-    """Per-slot pattern offset. Must match dmx_pat_h() in firmware/main_board_test/dmx_rx.h.
+    """Per-slot pattern offset. Must match dmx_pat_h() in libraries/PooferCommon/src/poofer_dmx_rx.h.
     Nonlinear in i, so a frame shifted by a dropped byte cannot pass as another seq."""
     x = (i * 0x9E3779B1) & 0xFFFFFFFF
     x ^= x >> 15

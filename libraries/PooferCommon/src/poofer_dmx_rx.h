@@ -1,4 +1,4 @@
-// dmx_rx.h - DMX512 frame parser and test-pattern checker for the board test.
+// poofer_dmx_rx.h - DMX512 frame parser and test-pattern checker (PooferCommon).
 //
 // Hardware-free: fed one RP2040/PL011 UARTDR word at a time (data in bits 7:0,
 // FE bit 8, PE bit 9, BE bit 10, OE bit 11) plus a microsecond timestamp, so the
