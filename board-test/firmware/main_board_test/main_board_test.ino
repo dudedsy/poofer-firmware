@@ -1,8 +1,15 @@
 /*
   main_board_test.ino
 
-  Bring-up test for the DMX base board (Rev A) and the UI lid board (Rev A), plus
-  the solenoid driver and igniter (spark) daughterboards when stacked.
+  Bring-up test for the DMX base board (Rev A) and the UI lid board (Rev A or
+  Rev B, detected), plus the solenoid driver and igniter (spark) daughterboards
+  when stacked.
+
+  UI revision: Rev B adds a fourth button, BACK (SW4), on U1 P1.6, active high
+  with R36 10k pull-down. Rev A leaves P1.6 open, so U1's internal pull-up holds
+  it high. Idle P1.6 low = Rev B, high = Rev A (UI spec Rev B, "BACK button").
+  A Rev B with BACK held, R36 open or SW4 shorted also reads high and looks like
+  Rev A; 'n' forces the revision so those faults get graded.
   Works with: base board alone; base + UI board without OLED; base + UI + OLED;
   on USB power alone or with 24 V. On USB alone the +5V rail (U1 buck) is dead
   by design (D2 blocks the module's VBUS from back-feeding it), so UI LEDs,
@@ -31,10 +38,11 @@
     4  I2C line check (stuck / missing pull-ups) and bus recovery
     5  raw boot scan (before touching the UI board)
     6  FRAM: WP pull-up, WP effectiveness, scratch write/readback, restore
-    7  UI board: TCA9555 power-on state, init, register identity, 12-line LED walk with readback
+    7  UI board: TCA9555 power-on state, revision (P1.6 idle level), init, register
+       identity, 12-line LED walk with readback
     8  OLED: reset release, VBAT on, init (internal IREF), test patterns
     9  full scan + expected/possible address report + stack device identity
-   10  buttons: idle level, then press test (only if UI board present)
+   10  buttons: idle level, then press test (only if UI board present); BACK too on Rev B
    11  ADC0-3 readings
    12  SPARE1 pull population
    13  CH1-CH6: pulldowns, pin-to-pin isolation, slow walk
@@ -47,7 +55,8 @@
    16  summary
 
   Menu commands run single tests; 'b', 'g' and 'v' run interactively from the
-  menu even when their board was not detected. 'h' lists all commands.
+  menu even when their board was not detected. 'n' cycles the UI revision
+  between auto, forced Rev A and forced Rev B. 'h' lists all commands.
 */
 
 #include <Arduino.h>
@@ -82,6 +91,7 @@
 // Pins, connector pins and I2C addresses come from PooferCommon's poofer_board.h.
 // Refdes strings below are only for this test's fault messages.
 static const char*   BTN_NAME[3] = {"UP", "DN", "SET"};
+static const char*   BTN_NAME4[4] = {"UP", "DN", "SET", "BACK"};   // BACK = UI Rev B SW4 on U1 P1.6
 static const char*   BTN_R[3] = {"R34", "R35", "R36"};
 static const char*   BTN_C[3] = {"C18", "C19", "C20"};
 
@@ -90,6 +100,8 @@ static const char*   BTN_C[3] = {"C18", "C19", "C20"};
 #define TCA_OLED_RES (1u << 7)   // P0.7, TSSOP-24 pin 11
 #define TCA_LED_MASK 0x3F3Fu     // P0.0-P0.5, P1.0-P1.5
 #define TCA_OUT_MASK 0x3FFFu     // every pin configured as output
+#define TCA_BTN_BACK (1u << 14)  // P1.6: Rev B SW4 BACK, active high (R36 pull-down); Rev A open
+#define TCA_SPARE    (1u << 15)  // P1.7: not connected on either rev, input on its pull-up
 static const uint8_t LED_BIT[4][3] = {{0, 1, 2}, {3, 4, 5}, {8, 9, 10}, {11, 12, 13}};
 
 Adafruit_NeoPixel px(1, PIN_WS2812, WS2812_ORDER + NEO_KHZ800);
@@ -133,6 +145,8 @@ static bool g_wire = false;
 static uint32_t g_i2cHz = 400000;
 static bool g_5v = false;            // +5V rail inferred present (24 V in, U1 alive)
 static bool g_uiPresent = false, g_uiInit = false;
+static char g_uiRev = 0;             // 'A', 'B', or 0 = not yet read
+static char g_uiRevForce = 0;        // 0 = auto (from P1.6), else 'A' or 'B' ('n' cycles)
 static int  g_oledFound = -1;        // -1 untested, 0 not found, 1 found
 static bool g_oledOn = false;
 static uint32_t g_oledOnAt = 0;
@@ -410,10 +424,41 @@ static void bitsToStr(uint16_t diff, uint16_t expect, char* out, size_t n) {
   }
 }
 
+// UI revision from the idle level of U1 P1.6 (UI spec Rev B, "BACK button").
+// Rev B: R36 pulls BTN_BACK low until SW4 is pressed. Rev A: P1.6 is open and
+// U1's internal ~100k pull-up holds it high. P1.6 is an input in every config
+// this test uses. Samples for 200 ms; one low read is enough for Rev B, so a
+// press during the window does not hide it. Also checks spare P1.7 floats high.
+static bool backPressed(bool* ok) {
+  uint16_t in = 0; *ok = tcaRead16(0x00, &in);
+  return *ok && (in & TCA_BTN_BACK);
+}
+static void uiDetectRev(bool report) {
+  bool sawLow = false, sawHigh = false, ok = true, spareLow = false;
+  for (int k = 0; k < 10; k++) {
+    uint16_t in = 0;
+    if (!tcaRead16(0x00, &in)) { ok = false; break; }
+    if (in & TCA_BTN_BACK) sawHigh = true; else sawLow = true;
+    if (!(in & TCA_SPARE)) spareLow = true;
+    delay(20);
+  }
+  if (!ok) { g_uiRev = g_uiRevForce; if (report) rec(G_UI, FAIL, "UI revision", "I2C read error on U1 input port; revision not read"); return; }
+  char det = sawLow ? 'B' : 'A';
+  g_uiRev = g_uiRevForce ? g_uiRevForce : det;
+  if (!report) return;
+  if (g_uiRevForce)
+    rec(G_UI, INFO, "UI revision", "Rev %c forced with 'n' (P1.6 idle %s, which reads as Rev %c)", g_uiRevForce, sawLow ? (sawHigh ? "low, pressed during check" : "low") : "high", det);
+  else if (det == 'B')
+    rec(G_UI, INFO, "UI revision", "Rev B: P1.6 (BTN_BACK) idle low via R36, so SW4 BACK is fitted and gets a press test");
+  else
+    rec(G_UI, INFO, "UI revision", "Rev A: P1.6 idle high on U1's internal pull-up (no BACK button). On a Rev B board this means BACK held, R36 open or SW4 shorted to 3V3: release it and rerun, or 'n' to force Rev B");
+  if (spareLow) rec(G_UI, WARN, "UI P1.7", "spare P1.7 reads low; it is not connected on either rev and should float high. Short to GND at U1 pin 20");
+}
+
 static void testUiBoard() {
   hdr("UI board: TCA9555 U1 at 0x20");
   if (!probe(ADDR_TCA)) {
-    g_uiPresent = false; g_uiInit = false;
+    g_uiPresent = false; g_uiInit = false; g_uiRev = 0;
     rec(G_UI, INFO, "UI board", "no ACK at 0x20: UI board unplugged, ribbon fault, or U1 dead. UI, OLED and button-press tests skipped");
     return;
   }
@@ -426,11 +471,11 @@ static void testUiBoard() {
       if (resLow && vbLow) rec(G_UI, PASS, "UI power-on state", "U1 at reset defaults; R10 holds RES# low, R13 holds VBAT_EN low (panel off, in reset)");
       else rec(G_UI, FAIL, "UI power-on state", "%s%s reads high with U1 pins as inputs: pulldown missing (R10 on RES#, R13 on VBAT_EN)",
                resLow ? "" : "RES# (P0.7) ", vbLow ? "" : "VBAT_EN (P0.6)");
-      rec(G_UI, INFO, "UI spare pins", "P1.6=%d P1.7=%d as inputs (1 expected, test pads only)", (in >> 14) & 1, (in >> 15) & 1);
     } else {
       rec(G_UI, INFO, "UI power-on state", "U1 already configured (cfg 0x%04X) since its power-up, so default-state check skipped. Power-cycle to run it", cfg);
     }
   }
+  uiDetectRev(true);
 
   if (!uiInit()) { rec(G_UI, FAIL, "UI init", "NAK writing U1 registers at %lu Hz", (unsigned long)g_i2cHz); return; }
   uint16_t pol = 0, cfgRb = 0;
@@ -658,54 +703,93 @@ static void addressReport() {
 }
 
 // ---------------------------------------------------------------- 10 buttons
+// UP, DN, SET: GP3-GP5, to GND when pressed, base R34-R36 / C18-C20 debounce.
+// BACK (UI Rev B only): U1 P1.6 over I2C, to +3V3 when pressed, UI R36 pull-down
+// and C11 at the switch. Index 3 below.
+static int g_backErr = 0;
+static bool btnDown(int i) {
+  if (i < 3) return !digitalRead(PIN_BTN[i]);
+  bool ok; bool p = backPressed(&ok);
+  if (!ok) g_backErr++;
+  return p;
+}
 static void testButtons(bool interactive, bool fromMenu) {
-  hdr("Buttons (GP3 UP, GP4 DN, GP5 SET)");
+  const bool back = interactive && g_uiInit && g_uiRev == 'B';
+  const int nb = back ? 4 : 3;
+  hdr(back ? "Buttons (GP3 UP, GP4 DN, GP5 SET, UI U1 P1.6 BACK)" : "Buttons (GP3 UP, GP4 DN, GP5 SET)");
   for (int i = 0; i < 3; i++) pinMode(PIN_BTN[i], INPUT_PULLUP);
   delay(60);   // release RC is ~5-8 ms through the internal pull-up
+  g_backErr = 0;
   int stuck = 0;
   for (int i = 0; i < 3; i++) if (!digitalRead(PIN_BTN[i])) {
     stuck |= 1 << i;
-    rec(G_BASE, FAIL, "button idle", "BTN_%s reads pressed at idle: short to GND. Unreworked tact switch (legs not clipped) on UI, or %s / %s / J2.%d. Measure across %s with UI unplugged",
-        BTN_NAME[i], BTN_C[i], BTN_R[i], BTN_J2[i], BTN_R[i]);
+    if (g_uiRev == 'B')
+      rec(G_BASE, FAIL, "button idle", "BTN_%s reads pressed at idle: short to GND. Button held, UI switch shorted, or %s / %s / J2.%d. Measure across %s with UI unplugged",
+          BTN_NAME[i], BTN_C[i], BTN_R[i], BTN_J2[i], BTN_R[i]);
+    else
+      rec(G_BASE, FAIL, "button idle", "BTN_%s reads pressed at idle: short to GND. Unreworked tact switch (legs not clipped) on UI, or %s / %s / J2.%d. Measure across %s with UI unplugged",
+          BTN_NAME[i], BTN_C[i], BTN_R[i], BTN_J2[i], BTN_R[i]);
   }
   if (!stuck) rec(G_BASE, PASS, "button idle", "all three read released (internal pull-ups, no shorts)");
+  if (back) {
+    int hi = 0;
+    for (int k = 0; k < 5; k++) { if (btnDown(3)) hi++; delay(5); }
+    if (g_backErr) rec(G_UI, FAIL, "BACK idle", "I2C read error on U1 input port (%d of 5 reads)", g_backErr);
+    else if (hi) { stuck |= 1 << 3; rec(G_UI, FAIL, "BACK idle", "BTN_BACK (U1 P1.6) reads pressed at idle: button held, R36 open or missing, or SW4 / the BACK net shorted to +3V3. Measure U1 pin 19 to GND, ~0.3 V expected"); }
+    else rec(G_UI, PASS, "BACK idle", "BTN_BACK reads released (R36 pull-down holds U1 P1.6 low)");
+  }
   if (!interactive) { rec(G_UI, SKIP, "button press", "UI board not detected; use 'b' to force (e.g. tweezers J2.%d/%d/%d to GND)", BTN_J2[0], BTN_J2[1], BTN_J2[2]); return; }
+  if (g_uiRev == 'A' && g_uiInit) Serial.println("  UI Rev A: three buttons, no BACK. ('n' forces Rev B if this board is really Rev B.)");
+  else if (!back && g_uiRev == 'B') Serial.println("  BACK not tested: U1 not initialised (needs the UI board on I2C).");
 
-  Serial.println("  Press each button when asked (10 s timeout; any key on serial skips).");
-  for (int i = 0; i < 3; i++) {
+  Serial.printf("  Press each button when asked (10 s timeout; any key on serial skips).\n");
+  for (int i = 0; i < nb; i++) {
     if (stuck & (1 << i)) continue;
-    if (i < 3) uiLed(i, false, false, true);
-    Serial.printf("  Press %s ...\n", BTN_NAME[i]);
+    uiLed(i, false, false, true);
+    Serial.printf("  Press %s ...\n", BTN_NAME4[i]);
+    g_backErr = 0;
     uint32_t t0 = millis(); bool got = false, skipped = false;
     while (millis() - t0 < 10000) {
       if (keyHit()) { skipped = true; break; }
-      if (!digitalRead(PIN_BTN[i])) { got = true; break; }
+      if (btnDown(i)) { got = true; break; }
     }
     if (skipped) { uiLed(i, false, false, false); rec(G_UI, SKIP, "button press", "skipped from serial"); break; }
     if (!got) {
       uiLed(i, true, false, false);
-      rec(G_UI, FAIL, "button press", "%s not seen in 10 s: switch, UI J1.%d, ribbon, or base %s open", BTN_NAME[i], BTN_J2[i], BTN_R[i]);
-      if (i == 0 && !fromMenu) { Serial.println("  No press at all; skipping the rest ('b' runs all three regardless)."); break; }
+      if (i < 3) rec(G_UI, FAIL, "button press", "%s not seen in 10 s: switch, UI J1.%d, ribbon, or base %s open", BTN_NAME4[i], BTN_J2[i], BTN_R[i]);
+      else rec(G_UI, FAIL, "button press", "BACK not seen in 10 s: SW4 open, BACK trace to U1 pin 19 open, or SW4 not reaching +3V3%s",
+               g_backErr ? " (I2C read errors while polling)" : "");
+      if (i == 0 && !fromMenu) { Serial.println("  No press at all; skipping the rest ('b' runs them all regardless)."); break; }
       continue;
     }
     int others = 0;
-    for (int j = 0; j < 3; j++) if (j != i && !digitalRead(PIN_BTN[j])) others |= 1 << j;
-    // count falling edges until released and stable for 150 ms (max 4 s)
-    int edges = 1, last = 0; uint32_t stableAt = 0, tp = millis();
+    for (int j = 0; j < nb; j++) if (j != i && !(stuck & (1 << j)) && btnDown(j)) others |= 1 << j;
+    // count press edges until released and stable for 150 ms (max 4 s)
+    int edges = 1; bool last = true; uint32_t stableAt = millis(), tp = millis();
     while (millis() - tp < 4000) {
-      int v = digitalRead(PIN_BTN[i]);
-      for (int j = 0; j < 3; j++) if (j != i && !digitalRead(PIN_BTN[j])) others |= 1 << j;
-      if (v != last) { if (!v) edges++; last = v; stableAt = millis(); }
-      if (v && millis() - stableAt > 150) break;
+      bool d = btnDown(i);
+      for (int j = 0; j < nb; j++) if (j != i && !(stuck & (1 << j)) && btnDown(j)) others |= 1 << j;
+      if (d != last) { if (d) edges++; last = d; stableAt = millis(); }
+      if (!d && millis() - stableAt > 150) break;
     }
     uiLed(i, false, true, false);
-    if (others) rec(G_BASE, FAIL, "button press", "%s also pulled %s%s%s low: nets shorted (J2 ribbon, R34-R36, or UI switch wiring)",
-                    BTN_NAME[i], (others & 1) ? "UP " : "", (others & 2) ? "DN " : "", (others & 4) ? "SET" : "");
-    else if (edges > 1) rec(G_UI, WARN, "button press", "%s ok but %d falling edges seen (bounce getting through: check %s fitted, Schmitt enabled)", BTN_NAME[i], edges, BTN_C[i]);
-    else rec(G_UI, PASS, "button press", "%s: one clean press/release, no cross-talk", BTN_NAME[i]);
+    if (others) {
+      char o[32] = "";
+      for (int j = 0; j < nb; j++) if (others & (1 << j)) { strncat(o, " ", sizeof o - strlen(o) - 1); strncat(o, BTN_NAME4[j], sizeof o - strlen(o) - 1); }
+      if (i == 3 || (others & (1 << 3)))
+        rec(G_UI, FAIL, "button press", "%s also showed%s pressed: BACK net (U1 P1.6, +3V3 side) shorted to another button net on the UI board, or a J2 ribbon fault", BTN_NAME4[i], o);
+      else
+        rec(G_BASE, FAIL, "button press", "%s also pulled%s low: nets shorted (J2 ribbon, R34-R36, or UI switch wiring)", BTN_NAME4[i], o);
+    }
+    else if (g_backErr) rec(G_UI, WARN, "button press", "%s ok but %d I2C read errors polling U1 for BACK", BTN_NAME4[i], g_backErr);
+    else if (edges > 1) {
+      if (i < 3) rec(G_UI, WARN, "button press", "%s ok but %d falling edges seen (bounce getting through: check %s fitted, Schmitt enabled)", BTN_NAME4[i], edges, BTN_C[i]);
+      else rec(G_UI, WARN, "button press", "BACK ok but %d rising edges seen (bounce getting through: check UI C11 fitted at SW4)", edges);
+    }
+    else rec(G_UI, PASS, "button press", "%s: one clean press/release, no cross-talk", BTN_NAME4[i]);
   }
   delay(300);
-  for (int i = 0; i < 3; i++) uiLed(i, false, false, false);
+  for (int i = 0; i < nb; i++) uiLed(i, false, false, false);
 }
 
 // ---------------------------------------------------------------- 11 ADC
@@ -1350,7 +1434,10 @@ static void printSummary() {
   int o = worst(-1);
   Serial.printf("  Totals: %d pass, %d warn, %d fail, %d info, %d skip  ->  OVERALL %s\n",
                 c[PASS], c[WARN], c[FAIL], c[INFO], c[SKIP], o == FAIL ? "FAIL" : o == WARN ? "WARN" : o == PASS ? "PASS" : "n/a");
-  Serial.printf("  Config: UI board %s, OLED %s, +5V rail %s\n", g_uiPresent ? "present" : "absent",
+  char uiTxt[32] = "absent";
+  if (g_uiPresent && g_uiRev) snprintf(uiTxt, sizeof uiTxt, "Rev %c%s", g_uiRev, g_uiRevForce ? " (forced)" : "");
+  else if (g_uiPresent) strcpy(uiTxt, "present");
+  Serial.printf("  Config: UI board %s, OLED %s, +5V rail %s\n", uiTxt,
                 g_oledFound == 1 ? "present" : g_oledFound == 0 ? "absent" : "n/a", g_5v ? "present (24 V)" : "absent (USB only?)");
   Serial.println("  LEDs: module = overall. UI LED1 base, LED2 UI, LED3 OLED, LED4 overall (24 V only). Green pass, yellow warn, red fail, blue nothing graded.");
 }
@@ -1368,6 +1455,7 @@ static void printMenu() {
     "  t  slow SDA/SCL toggle         v  solenoid board test\n"
     "  g  igniter board test          m  thermocouple monitor\n"
     "  d  DMX receive test (5 s)      e  DMX live monitor\n"
+    "  n  UI rev: auto / force A / force B\n"
     "  h  this menu");
 }
 
@@ -1383,7 +1471,7 @@ static void runAll() {
   testDmxRail();
   testI2CLines();
   if (g_uiInit) oledSleep();     // rerun: shut the panel down properly first
-  g_uiInit = false; g_uiPresent = false; g_oledFound = -1;
+  g_uiInit = false; g_uiPresent = false; g_uiRev = 0; g_oledFound = -1;
   wireStart(I2C_SCAN_HZ); scan(ackBoot); wireStart(g_i2cHz);
   testFram();
   testUiBoard();
@@ -1443,7 +1531,14 @@ void loop() {
     case 'f': clearResults(); testFram(); break;
     case 'u': clearResults(); oledSleep(); testUiBoard(); break;
     case 'o': clearResults(); if (!g_uiPresent && probe(ADDR_TCA)) { g_uiPresent = true; uiInit(); } testOled(); break;
-    case 'b': clearResults(); if (!g_uiInit && probe(ADDR_TCA)) { g_uiPresent = true; uiInit(); } testButtons(true, true); break;
+    case 'b': clearResults();
+              if (probe(ADDR_TCA)) { if (!g_uiInit) { g_uiPresent = true; uiInit(); } uiDetectRev(true); }
+              testButtons(true, true); break;
+    case 'n': g_uiRevForce = g_uiRevForce == 0 ? 'A' : g_uiRevForce == 'A' ? 'B' : 0;
+              if (g_uiInit) uiDetectRev(false); else g_uiRev = g_uiRevForce;
+              if (g_uiRevForce) Serial.printf("  UI revision forced to Rev %c ('n' again cycles; 'a' or 'b' to test)\n", g_uiRevForce);
+              else Serial.printf("  UI revision: auto from U1 P1.6%s%c\n", g_uiRev ? ", now reads Rev " : " (UI board not read yet)", g_uiRev ? g_uiRev : ' ');
+              return;
     case 'p': clearResults(); testDmxRail(); break;
     case 'i': i2cDiag(); return;
     case 't': lineToggle(); return;

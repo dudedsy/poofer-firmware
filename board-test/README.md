@@ -1,10 +1,10 @@
 # Board bring-up test
 
-Firmware for bench-testing the production boards: the DMX base board (Rev A), the UI lid board (Rev A), and, when stacked, the solenoid driver and igniter (spark) daughterboards. It runs a full test sequence at boot, prints a graded report over USB serial, and then takes single-letter commands to rerun individual tests.
+Firmware for bench-testing the production boards: the DMX base board (Rev A), the UI lid board (Rev A or Rev B, detected automatically), and, when stacked, the solenoid driver and igniter (spark) daughterboards. It runs a full test sequence at boot, prints a graded report over USB serial, and then takes single-letter commands to rerun individual tests.
 
 `host/artnet_send.py` is the DMX source for the receive test: it runs on the controller Pi and sends Art-Net to the CR011R node, which puts DMX on the XLR into the base board's J1.
 
-**Status:** run on hardware. A base board with UI board and OLED passes the full sequence on 24 V (all status LEDs green). The solenoid test (`v`) and igniter test (`g`) have been run on one board each. DMX receive (`d`) passes on one base board with the Pi + CR011R sending `artnet_send.py`'s pattern: 30 Hz, 512 slots, every slot correct. The CR011R puts out one DMX frame per Art-Net packet (pattern changed on all but one frame), not a fixed refresh. The `e` monitor and the Art-Net loss test are not yet run.
+**Status:** run on hardware. A base board with UI board and OLED passes the full sequence on 24 V (all status LEDs green). The solenoid test (`v`) and igniter test (`g`) have been run on one board each. DMX receive (`d`) passes on one base board with the Pi + CR011R sending `artnet_send.py`'s pattern: 30 Hz, 512 slots, every slot correct. The CR011R puts out one DMX frame per Art-Net packet (pattern changed on all but one frame), not a fixed refresh. The `e` monitor and the Art-Net loss test are not yet run. UI Rev B detection and the BACK button test build but have not been run on a Rev B board.
 
 **Bench only.** The full run drives the CH1-CH6 gate lines and, if a solenoid board is detected, opens its valve. Keep the gas closed and nothing connected to a burner. An igniter wired to the selected channel will spark during the CH walk.
 
@@ -30,10 +30,10 @@ Most of the base board tests run on USB alone. +5V comes only from the U1 buck o
 | +5V / DMX logic side | +3V3_DMX present via R38/R39 (infers 24 V and U1, U5 alive); R37 DE pulldown |
 | I2C lines | Both lines pulled up by R3/R4, not stuck; 9-clock recovery if SDA is held |
 | FRAM U4 | R47 WP pull-up, ACK at 0x50, device ID, write protect works, write/readback/restore at 0x1FF0, no address aliasing |
-| UI board U1 (TCA9555, 0x20) | Power-on state (R10, R13 pulldowns), register identity, all 12 LED sink lines read back; visual LED walk on 24 V |
+| UI board U1 (TCA9555, 0x20) | Power-on state (R10, R13 pulldowns), [revision](#ui-board-revision) from P1.6, spare P1.7 floats high, register identity, all 12 LED sink lines read back; visual LED walk on 24 V |
 | OLED (SSD1315, 0x3C) | Held in reset until U1 releases it; init with internal IREF; white, checkerboard, orientation pattern on 24 V |
 | Address report | Every expected and possible address on the bus (base, UI, igniter), found / missing / unexpected |
-| Buttons | Idle level; press test for UP, DN, SET with bounce and cross-talk check (UI board present) |
+| Buttons | Idle level; press test for UP, DN, SET, plus BACK on UI Rev B, with bounce and cross-talk check (UI board present) |
 | ADC0-3 | Readings (floating with nothing stacked) |
 | SPARE1 | Which pull, if any, is fitted |
 | CH1-CH6 | R11-R16 pulldowns, line-to-line isolation, 0.5 s walk per channel |
@@ -53,7 +53,8 @@ Status LEDs at the end: module WS2812 shows the overall result; on 24 V the UI L
 | `f` | FRAM test |
 | `u` | UI board (U1 and LED walk) |
 | `o` | OLED test |
-| `b` | Button press test, runs even if no UI board was detected |
+| `b` | Button press test, runs even if no UI board was detected. Rereads the UI revision first, so BACK is included on Rev B |
+| `n` | UI revision: cycles auto / force Rev A / force Rev B. Then `a` or `b` to test |
 | `c` | CH1-CH6 checks and walk |
 | `d` | DMX receive test, 5 s, graded. No DMX is a FAIL here |
 | `e` | DMX live monitor: rate, pattern check and slots 1-12 twice a second; flags gaps over 1 s |
@@ -69,6 +70,17 @@ Status LEDs at the end: module WS2812 shows the overall result; on 24 V the UI L
 | `k` | Toggle functional I2C clock 100 / 400 kHz |
 | `r` | Reprint summary |
 | `h` | Menu |
+
+## UI board revision
+
+UI Rev B adds a fourth button, BACK (SW4), read through the expander on U1 P1.6 (pin 19): active high, SW4 to +3V3, UI R36 10k pull-down and C11 100 nF at the switch. Rev A leaves P1.6 open, so U1's internal pull-up holds it high. The test reads P1.6 for 200 ms when it first talks to U1:
+
+| P1.6 | Reported | Buttons tested |
+|---|---|---|
+| Low at least once | Rev B | UP, DN, SET, BACK (idle must read low; press must read high, one clean edge, no cross-talk) |
+| High throughout | Rev A | UP, DN, SET |
+
+A Rev B board with BACK held, R36 open or SW4 shorted to +3V3 also reads high and is reported as Rev A (the INFO line says so). Release BACK and rerun, or press `n` until it says Rev B and run `b`: with the revision forced, a high idle level is a BACK idle FAIL. The summary's Config line shows the revision and whether it was forced.
 
 ## DMX receive
 
