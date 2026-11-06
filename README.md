@@ -24,7 +24,7 @@ Windows, in PowerShell (no admin needed for a junction). Replace the target with
 ```
 New-Item -ItemType Junction `
   -Path   "$env:USERPROFILE\Documents\Arduino\libraries\PooferCommon" `
-  -Target "$env:USERPROFILE\Documents\poofers\firmware\poofer-firmware\libraries\PooferCommon"
+  -Target "$env:USERPROFILE\Documents\poofers\poofer-firmware\libraries\PooferCommon"
 ```
 
 Restart the IDE. PooferCommon then shows under Sketch > Include Library, and edits in the repo take effect immediately. If you move or rename the clone, delete the junction (`Remove-Item` on the junction path; this does not touch the repo) and make it again.
